@@ -38,9 +38,11 @@ class _LoopRunner:
 class _FullScanBackend:
     MAX_BROWSER_WORKERS = 3
 
-    def __init__(self, workers=1, timeout=30):
+    def __init__(self, workers=1, timeout=30, sandbox=True, insecure=False):
         self.workers = workers
         self.timeout = timeout
+        self.sandbox = sandbox
+        self.insecure = insecure
         self.pool = None
         self.pool_size = 0
 
@@ -52,7 +54,12 @@ class _FullScanBackend:
 
             return
 
-        pool = DriverPool(size=size, timeout=self.timeout)
+        pool = DriverPool(
+            size=size,
+            timeout=self.timeout,
+            sandbox=self.sandbox,
+            insecure=self.insecure,
+        )
 
         try:
             await pool.start()
@@ -141,7 +148,7 @@ class _FullScanBackend:
 class Wappalyzer:
     SUPPORTED_SCAN_TYPES = {"fast", "balanced", "full"}
 
-    def __init__(self, scan_type="full", workers=1, cookie=None, timeout=30):
+    def __init__(self, scan_type="full", workers=1, cookie=None, timeout=30, sandbox=True, insecure=False):
         scan_type = scan_type.lower()
 
         if scan_type not in self.SUPPORTED_SCAN_TYPES:
@@ -160,6 +167,8 @@ class Wappalyzer:
         self.workers = workers
         self.cookie = cookie
         self.timeout = timeout
+        self.sandbox = sandbox
+        self.insecure = insecure
         self._closed = False
         self._runner = None
         self._full_backend = None
@@ -237,6 +246,8 @@ class Wappalyzer:
                 self._full_backend = _FullScanBackend(
                     workers=self.workers,
                     timeout=self.timeout,
+                    sandbox=self.sandbox,
+                    insecure=self.insecure,
                 )
 
             return self._runner
@@ -250,14 +261,14 @@ class Wappalyzer:
                 self._full_backend.analyze_url(url, cookie=cookie)
             )
 
-        return url, http_scan(url, self.scan_type, cookie)
+        return url, http_scan(url, self.scan_type, cookie, self.timeout, self.insecure)
 
     def _analyze_many_http(self, urls, cookie=None, on_result=None, on_error=None):
         worker_count = min(self.workers, len(urls))
         results = {}
 
         def scan(url):
-            return url, http_scan(url, self.scan_type, cookie)
+            return url, http_scan(url, self.scan_type, cookie, self.timeout, self.insecure)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
             future_to_url = {
@@ -290,11 +301,13 @@ class Wappalyzer:
 Scanner = Wappalyzer
 
 
-def analyze(url, scan_type="full", workers=1, cookie=None, timeout=30):
+def analyze(url, scan_type="full", workers=1, cookie=None, timeout=30, sandbox=True, insecure=False):
     with Wappalyzer(
         scan_type=scan_type,
         workers=workers,
         cookie=cookie,
         timeout=timeout,
+        sandbox=sandbox,
+        insecure=insecure,
     ) as scanner:
         return scanner.analyze(url)

@@ -62,6 +62,12 @@ docker compose run --rm wappalyzer -i https://example.com
 ```bash
 docker compose run --rm wappalyzer -i urls.txt -w 3 -oJ output.json
 ```
+
+The container runs as a non-root user (uid 1000) with Chromium's sandbox enabled. `docker-compose.yml` sets the options the sandbox needs; with plain `docker run`, pass them yourself:
+```bash
+docker run --rm --shm-size 2g --security-opt seccomp=docker/seccomp_profile.json --security-opt no-new-privileges:true --cap-drop ALL --cap-add SYS_CHROOT -v "$PWD:/app" wappalyzer -i https://example.com
+```
+Output files are written to the mounted directory as uid 1000, so that directory must be writable by it.
 </details>
 
 ## For Users
@@ -70,7 +76,7 @@ Some common usage examples are given below, refer to list of all options for mor
 - Scan a single URL: `wappalyzer -i https://example.com`
 - Scan multiple URLs from a file: `wappalyzer -i urls.txt -w 3`
 - Set page-load timeout for full scans: `wappalyzer -i urls.txt -t 15`
-- Scan with authentication: `wappalyzer -i https://example.com -c "sessionid=abc123; token=xyz789"`
+- Scan with authentication: `wappalyzer -i https://example.com --cookie-file cookie.txt` (or set `WAPPALYZER_COOKIE`; `-c "sessionid=abc123"` also works but is visible in the process list and shell history)
 - Export results to JSON: `wappalyzer -i https://example.com -oJ results.json`
 - Export JSON to stdout: `wappalyzer -i https://example.com -oJ`
 
@@ -86,11 +92,27 @@ When an output flag is used without a file, the report is written to stdout. Sta
   - `balanced`: HTTP-based scan with more requests
   - `full`: Complete scan using wappalyzer extension
 - `-w, --workers`: Number of concurrent workers (default: 5; full scans are capped at 3)
-- `-t, --timeout`: Maximum seconds to wait for a page load in full scans (default: 30)
+- `-t, --timeout`: Maximum seconds to wait for a page load or HTTP response (default: 30)
 - `-oJ [file]`: JSON output file path, or stdout when the file is omitted or set to `-`
 - `-oC [file]`: CSV output file path, or stdout when the file is omitted or set to `-`
 - `-oH [file]`: HTML output file path, or stdout when the file is omitted or set to `-`
 - `-c, --cookie`: Cookie header string for authenticated scans
+- `--cookie-file`: Read the cookie header string from a file (the `WAPPALYZER_COOKIE` environment variable is used when neither is given)
+- `--insecure`: Do not verify TLS certificates
+- `--no-sandbox`: Disable the Chromium sandbox. Only use this inside an isolated container; `WAPPALYZER_NO_SANDBOX=1` does the same
+
+#### Security
+
+Scanned sites are treated as untrusted:
+
+- Chromium runs with its sandbox enabled, so wappalyzer refuses to run full scans as root unless `--no-sandbox` is given.
+- When the target is a public site, requests it triggers to private, loopback or link-local addresses (scripts, `fetch()`, WebSockets, redirects in HTTP scans, `robots.txt`) are blocked, so a hostile page cannot reach your internal network through the scanner. Scanning an internal target directly is still allowed. Redirects followed by the browser itself are not checked, which is the same exposure as opening the page in a normal browser.
+- TLS certificates are verified. Behind a TLS-inspecting corporate proxy, point `REQUESTS_CA_BUNDLE` at your company's CA bundle instead of using `--insecure`.
+- HTTP responses are limited to 10 MB and to the `-t` timeout.
+- Browser storage, cookies and cache are wiped between URLs, and downloads are refused.
+- The bundled Wappalyzer extension's usage reporting to wappalyzer.com, which includes scanned hostnames, is turned off.
+- DNS lookups for balanced scans use the system resolver instead of a hard-coded public one.
+- Values taken from scanned pages are escaped in HTML reports, which also carry a Content-Security-Policy. They are neutralised against formula injection in CSV, and stripped of control characters on the terminal.
 
 ## For Developers
 
@@ -151,7 +173,9 @@ Do not call the top-level `analyze()` function in a loop for large jobs. Use `Wa
   - `'full'`: Complete scan including JavaScript execution (default)
 - `workers` (int, optional): Number of browser workers to create for full scans (default: 1)
 - `cookie` (str, optional): Cookie header string for authenticated scans
-- `timeout` (int, optional): Maximum seconds to wait for a page load in full scans (default: 30)
+- `timeout` (int, optional): Maximum seconds to wait for a page load or HTTP response (default: 30)
+- `sandbox` (bool, optional): Run Chromium with its sandbox (default: True). Must run as a non-root user
+- `insecure` (bool, optional): Skip TLS certificate verification (default: False)
 
 #### Return Value
 

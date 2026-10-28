@@ -25,7 +25,7 @@ setup(
         'requests',
         'urllib3',
         'huepy',
-        'playwright',
+        'playwright>=1.48',
         'tldextract',
         'beautifulsoup4',
         'dnspython'
