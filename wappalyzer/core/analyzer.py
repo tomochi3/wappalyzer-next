@@ -14,18 +14,18 @@ from wappalyzer.core.matcher import match, match_dict
 from wappalyzer.core.config import tech_db
 from wappalyzer.analyzers.dom import match_dom
 from wappalyzer.analyzers.js import match_js
-from wappalyzer.core.requester import get_response
+from wappalyzer.core.requester import DEFAULT_TIMEOUT, Fetcher
 from wappalyzer.core.utils import create_result
 
 
-def process_scripts(base_url, js, scriptSrc):
+def process_scripts(fetcher, base_url, js, scriptSrc):
     def fetch_and_process(src):
         if src.endswith('.js') or '.js?' in src:
-            js_code = get_response(src)
+            js_code = fetcher.get(src)
             if js_code and js_code.headers.get('Content-Type', '').startswith('application/javascript'):
                 js_dict, low_dict, js_classes = get_js(js_code.text)
                 if js_dict:
-                    return {'dict': js_dict, 'low_dict': low_dict, 'classes': js_classes, 'src': src}
+                    return {'dict': js_dict, 'low_dict': low_dict, 'classes': js_classes, 'text': js_code.text}
         return None
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
@@ -34,12 +34,12 @@ def process_scripts(base_url, js, scriptSrc):
             result = future.result()
             if result:
                 js.append({'dict': result['dict'], 'low_dict': result['low_dict'], 'classes': result['classes']})
-                js_code_response = get_response(result['src'])
-                if js_code_response:
-                    scriptSrc.extend(get_scriptSrc(base_url, js_code_response.text))
+                scriptSrc.extend(get_scriptSrc(base_url, result['text']))
 
 
-def analyze_from_response(response, scan_type):
+def analyze_from_response(response, scan_type, fetcher=None):
+    if fetcher is None:
+        fetcher = Fetcher(response.url)
     soup = BeautifulSoup(response.text, 'html.parser')
     r = tldextract.extract(response.url)
     domain = r.domain + '.' + r.suffix
@@ -56,12 +56,12 @@ def analyze_from_response(response, scan_type):
                 js.append({'dict': js_dict, 'low_dict': low_dict, 'classes': js_classes})
 
     if scan_type != 'fast':
-        process_scripts(response.url, js, scriptSrc)
+        process_scripts(fetcher, response.url, js, scriptSrc)
 
     dns = get_dns(domain) if scan_type != 'fast' else {}
     meta = get_meta(soup)
     cookies = response.cookies.get_dict()
-    robots = get_robots(response.url) if scan_type != 'fast' else ''
+    robots = get_robots(fetcher, response.url) if scan_type != 'fast' else ''
     certIssuer = get_certIssuer(response)
 
     result = {}
@@ -160,8 +160,9 @@ def analyze_from_response(response, scan_type):
     return create_result(new_result)
 
 
-def http_scan(url, scan_type, cookie=None):
-    response = get_response(url, cookie)
+def http_scan(url, scan_type, cookie=None, timeout=DEFAULT_TIMEOUT, insecure=False):
+    fetcher = Fetcher(url, cookie=cookie, timeout=timeout, insecure=insecure)
+    response = fetcher.get(url, send_cookie=True)
     if response:
-        return analyze_from_response(response, scan_type)
+        return analyze_from_response(response, scan_type, fetcher)
     return {}

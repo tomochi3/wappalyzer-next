@@ -8,17 +8,34 @@ import zipfile
 from contextlib import asynccontextmanager
 from http.cookies import SimpleCookie
 from pathlib import Path
+from urllib.parse import urlparse
 
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api import async_playwright
 
 from wappalyzer.core.config import extension_path
+from wappalyzer.core.security import NetworkPolicy, strip_control_chars
 from wappalyzer.core.utils import create_result
 
 
 WAPPALYZER_POPUP_PATH = "html/popup.html"
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 BLOCKED_RESOURCE_TYPES = {"image", "font", "media"}
+# the bundled extension reports scanned hostnames to these by default
+EXTENSION_TELEMETRY_HOSTS = ("ping.wappalyzer.com", "api.wappalyzer.com")
+DISABLE_EXTENSION_TELEMETRY_SCRIPT = """
+async () => {
+  await chrome.storage.local.set({ tracking: false })
+
+  if (typeof optionCache !== 'undefined') {
+    optionCache.set('tracking', false)
+  }
+
+  return typeof getCachedOption === 'function'
+    ? await getCachedOption('tracking', true)
+    : (await chrome.storage.local.get('tracking')).tracking
+}
+"""
 
 SELECT_TARGET_TAB_SCRIPT = """
 async (targetUrl) => {
@@ -359,14 +376,40 @@ def _page_quiet(activity, quiet_ms=1000):
 
 
 class BrowserDriver:
-    def __init__(self, context, page, user_data_dir, extension_id, timeout_ms):
+    def __init__(self, context, user_data_dir, timeout_ms):
         self.context = context
-        self.page = page
+        self.page = None
         self.user_data_dir = Path(user_data_dir)
-        self.extension_id = extension_id
+        self.extension_id = None
         self.timeout_ms = timeout_ms
         self.popup = None
         self.pending_cookies = []
+        self.policy = None
+        self.visited_origins = set()
+        self.cdp = None
+
+    async def route_handler(self, route):
+        request = route.request
+
+        if request.resource_type in BLOCKED_RESOURCE_TYPES:
+            await route.abort()
+            return
+
+        if urlparse(request.url).scheme in ("http", "https"):
+            if self.policy and not await self.policy.allows_async(request.url):
+                await route.abort("blockedbyclient")
+                return
+
+            parsed = urlparse(request.url)
+            self.visited_origins.add(f"{parsed.scheme}://{parsed.netloc}")
+
+        await route.continue_()
+
+    async def websocket_handler(self, ws):
+        if self.policy and await self.policy.allows_async(ws.url.replace("ws", "http", 1)):
+            ws.connect_to_server()
+        else:
+            await ws.close()
 
     def add_cookie(self, cookie):
         self.pending_cookies.append(cookie)
@@ -388,15 +431,32 @@ class BrowserDriver:
         await self.context.add_cookies(cookies)
 
     async def reset(self):
+        # stop the scanned page's scripts and wipe everything it stored so
+        # nothing carries over to the next URL
+        try:
+            await self.page.goto("about:blank")
+        except Exception:
+            pass
+
         try:
             await self.context.clear_cookies()
         except Exception:
             pass
 
+        origins, self.visited_origins = self.visited_origins, set()
+
         try:
-            await self.page.evaluate("() => { localStorage.clear(); sessionStorage.clear(); }")
+            if self.cdp is None:
+                self.cdp = await self.context.new_cdp_session(self.page)
+
+            for origin in origins:
+                await self.cdp.send("Storage.clearDataForOrigin", {"origin": origin, "storageTypes": "all"})
+
+            await self.cdp.send("Network.clearBrowserCache")
         except Exception:
             pass
+
+        self.policy = None
 
     async def close(self):
         try:
@@ -408,10 +468,12 @@ class BrowserDriver:
 
 
 class DriverPool:
-    def __init__(self, size=3, max_retries=3, timeout=30):
+    def __init__(self, size=3, max_retries=3, timeout=30, sandbox=True, insecure=False):
         self.size = size
         self.max_retries = max_retries
         self.timeout = timeout
+        self.sandbox = sandbox
+        self.insecure = insecure
         self.queue = asyncio.Queue()
         self.closed = False
         self.playwright = None
@@ -419,6 +481,13 @@ class DriverPool:
         self.drivers = []
 
     async def start(self):
+        if self.sandbox and hasattr(os, "geteuid") and os.geteuid() == 0:
+            raise RuntimeError(
+                "Chromium's sandbox cannot run as root. Run wappalyzer as a normal "
+                "user, or disable the sandbox (--no-sandbox / sandbox=False) only "
+                "inside an isolated container."
+            )
+
         self.playwright = await async_playwright().start()
         self.extension_dir = _prepare_extension_dir(os.path.abspath(extension_path))
 
@@ -430,7 +499,16 @@ class DriverPool:
                 await self.queue.put(driver)
 
         if self.queue.empty():
-            raise RuntimeError("Failed to initialize Chromium browser contexts")
+            message = "Failed to initialize Chromium browser contexts"
+
+            if self.sandbox:
+                message += (
+                    ". If this runs in Docker, the Chromium sandbox needs "
+                    "--security-opt seccomp=docker/seccomp_profile.json "
+                    "--cap-drop ALL --cap-add SYS_CHROOT (see docker-compose.yml)"
+                )
+
+            raise RuntimeError(message)
 
     async def grow_to(self, size):
         if self.closed or size <= self.size:
@@ -459,7 +537,9 @@ class DriverPool:
                     user_agent=USER_AGENT,
                     timezone_id="UTC",
                     reduced_motion="reduce",
-                    ignore_https_errors=True,
+                    ignore_https_errors=self.insecure,
+                    chromium_sandbox=self.sandbox,
+                    accept_downloads=False,
                     args=[
                         f"--disable-extensions-except={self.extension_dir}",
                         f"--load-extension={self.extension_dir}",
@@ -479,6 +559,9 @@ class DriverPool:
                         "--mute-audio",
                         "--no-first-run",
                         "--no-default-browser-check",
+                        "--host-resolver-rules=" + ", ".join(
+                            f"MAP {host} ~NOTFOUND" for host in EXTENSION_TELEMETRY_HOSTS
+                        ),
                     ],
                 )
 
@@ -486,19 +569,15 @@ class DriverPool:
                 context.set_default_timeout(timeout_ms)
                 context.set_default_navigation_timeout(timeout_ms)
 
-                async def route_handler(route):
-                    if route.request.resource_type in BLOCKED_RESOURCE_TYPES:
-                        await route.abort()
-                    else:
-                        await route.continue_()
+                driver = BrowserDriver(context, user_data_dir, timeout_ms)
+                await context.route("**/*", driver.route_handler)
+                await context.route_web_socket("**/*", driver.websocket_handler)
 
-                await context.route("**/*", route_handler)
-
-                extension_id = await self._get_extension_id(context)
+                driver.extension_id = await self._get_extension_id(context)
                 pages = context.pages
-                page = pages[0] if pages else await context.new_page()
+                driver.page = pages[0] if pages else await context.new_page()
 
-                return BrowserDriver(context, page, user_data_dir, extension_id, timeout_ms)
+                return driver
             except Exception as e:
                 if context:
                     try:
@@ -518,6 +597,12 @@ class DriverPool:
 
         if service_worker is None:
             service_worker = await context.wait_for_event("serviceworker", timeout=10000)
+
+        # stop the extension from sending scanned hostnames to wappalyzer.com
+        tracking = await service_worker.evaluate(DISABLE_EXTENSION_TELEMETRY_SCRIPT)
+
+        if tracking is not False:
+            raise RuntimeError("Failed to disable Wappalyzer extension telemetry")
 
         return service_worker.url.split("/")[2]
 
@@ -644,6 +729,7 @@ async def _get_detections(driver, target_url):
 
 async def process_url(driver, url):
     try:
+        driver.policy = await asyncio.to_thread(NetworkPolicy, url)
         await driver.apply_pending_cookies(url)
 
         try:
@@ -662,7 +748,7 @@ async def process_url(driver, url):
 
         return url, await _get_detections(driver, driver.page.url)
     except Exception:
-        print(f"Error processing: {url}", file=sys.stderr)
+        print(strip_control_chars(f"Error processing: {url}"), file=sys.stderr)
         return url, []
 
 

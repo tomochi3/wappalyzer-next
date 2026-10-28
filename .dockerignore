@@ -1,0 +1,9 @@
+# only ship what the package needs, so cookies, scan results or other
+# local files in the build directory never end up in the image
+*
+!wappalyzer/
+!setup.py
+!pyproject.toml
+!README.md
+!LICENSE
+**/__pycache__

@@ -1,10 +1,12 @@
 import argparse
+import os
 import re
 import sys
 
 import tldextract
 from huepy import bold, green
 
+from wappalyzer.core.security import strip_control_chars
 from wappalyzer.core.utils import pretty_print, write_to_file
 from wappalyzer.scanner import Wappalyzer, analyze
 
@@ -29,9 +31,24 @@ def main():
     parser.add_argument('-oJ', help='json output file, or stdout when omitted or set to -', dest='json_output_file', nargs='?', const='-')
     parser.add_argument('-oC', help='csv output file, or stdout when omitted or set to -', dest='csv_output_file', nargs='?', const='-')
     parser.add_argument('-oH', help='html output file, or stdout when omitted or set to -', dest='html_output_file', nargs='?', const='-')
-    parser.add_argument('-c', '--cookie', help='cookie string', dest='cookie')
-    parser.add_argument('-t', '--timeout', help='maximum seconds to wait for a page load in full scans', dest='timeout', default=30, type=positive_int)
+    parser.add_argument('-c', '--cookie', help='cookie string (visible to other local users; prefer --cookie-file or WAPPALYZER_COOKIE)', dest='cookie')
+    parser.add_argument('--cookie-file', help='read the cookie string from a file', dest='cookie_file')
+    parser.add_argument('-t', '--timeout', help='maximum seconds to wait for a page load or HTTP response', dest='timeout', default=30, type=positive_int)
+    parser.add_argument('--insecure', help='do not verify TLS certificates', dest='insecure', action='store_true')
+    parser.add_argument('--no-sandbox', help='disable the Chromium sandbox (only inside an isolated container)', dest='sandbox', action='store_false',
+                        default=os.environ.get('WAPPALYZER_NO_SANDBOX', '') not in ('1', 'true', 'yes'))
     args = parser.parse_args()
+
+    if args.cookie_file:
+        with open(args.cookie_file, 'r') as cookie_file:
+            args.cookie = cookie_file.read().strip()
+    elif not args.cookie:
+        args.cookie = os.environ.get('WAPPALYZER_COOKIE') or None
+
+    if args.insecure:
+        print('Warning: TLS certificate verification is disabled', file=sys.stderr)
+    if not args.sandbox:
+        print('Warning: the Chromium sandbox is disabled', file=sys.stderr)
 
     print('\n\t' + bold(green('wappalyzer')) + '\n', file=sys.stderr)
 
@@ -67,7 +84,7 @@ def main():
 
         def handle_error(url, error):
             clear_status_line()
-            print(f"Error processing: {url}: {error}", file=sys.stderr)
+            print(strip_control_chars(f"Error processing: {url}: {error}"), file=sys.stderr)
 
         def handle_result(url, technologies):
             nonlocal processed_count
@@ -87,6 +104,8 @@ def main():
                 workers=num_workers,
                 cookie=cookie,
                 timeout=timeout,
+                sandbox=args.sandbox,
+                insecure=args.insecure,
             ) as scanner:
                 print_status()
                 scanner_results = scanner.analyze_many(
@@ -117,6 +136,8 @@ def main():
                 1,
                 args.cookie,
                 args.timeout,
+                args.sandbox,
+                args.insecure,
             )
             if should_print:
                 pretty_print(result)
@@ -143,6 +164,8 @@ def main():
                         1,
                         args.cookie,
                         args.timeout,
+                        args.sandbox,
+                        args.insecure,
                     )
                     if should_print:
                         pretty_print(result)
@@ -155,6 +178,9 @@ def main():
 
     except KeyboardInterrupt:
         print("\nProgram interrupted by user. Saving partial results...", file=sys.stderr)
+    except RuntimeError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        exit(1)
 
     if 'result' in locals():
         if args.json_output_file:

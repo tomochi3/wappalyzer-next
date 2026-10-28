@@ -5,3 +5,14 @@ services:
     volumes:
       - .:/app
     working_dir: /app
+    # Chromium renders untrusted pages inside its own sandbox. Docker's default
+    # seccomp profile blocks the user namespaces that sandbox needs, so use
+    # Playwright's profile (default profile + clone/unshare/setns), from
+    # https://github.com/microsoft/playwright/blob/v1.63.0/utils/docker/seccomp_profile.json
+    security_opt:
+      - seccomp=./docker/seccomp_profile.json
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - SYS_CHROOT

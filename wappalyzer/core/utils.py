@@ -1,9 +1,13 @@
+import base64
 import csv
+import hashlib
+import html
 import json
 import sys
 from huepy import bold, green
 from wappalyzer.core.config import cat_db, groups_db, tech_db
 from wappalyzer.core.matcher import parse_pattern
+from wappalyzer.core.security import csv_safe, strip_control_chars
 
 
 def get_cats_and_groups(tech_name):
@@ -59,10 +63,11 @@ def create_result(technologies):
 
 def pretty_print(result):
     for url, value in result.items():
-        output_string = bold(green(url)) + ' '
+        output_string = bold(green(strip_control_chars(url))) + ' '
         for name, data in value.items():
+            name = strip_control_chars(name)
             if data['version']:
-                output_string += f"{name} v{data['version']}, "
+                output_string += f"{name} v{strip_control_chars(data['version'])}, "
             else:
                 output_string += f"{name}, "
         print(output_string.rstrip(', '))
@@ -74,6 +79,7 @@ def generate_html_report(data):
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src '{script_hash}'; base-uri 'none'; form-action 'none'">
     <title>wappalyzer results</title>
     <style>
         body {
@@ -190,6 +196,7 @@ def generate_html_report(data):
         }
         .tech-name {
             font-weight: bold;
+            overflow-wrap: anywhere;
         }
         .tech-meta {
             color: #666;
@@ -204,7 +211,7 @@ def generate_html_report(data):
                 <input type="text" id="searchInput" class="search-box" placeholder="Search technologies or URLs...">
                 <div id="autocompleteList" class="autocomplete-list"></div>
             </div>
-            <button onclick="downloadUrls()">Download URLs</button>
+            <button id="downloadButton">Download URLs</button>
         </div>
         <div id="tagsContainer" class="tags-container"></div>
     </div>
@@ -212,10 +219,12 @@ def generate_html_report(data):
     <div class="results" id="results">
     '''
     
+    # every value below can come from the scanned site, so it must be escaped
+    esc = html.escape
     for url, technologies in data.items():
         html_template += f'''
-        <div class="site" data-url="{url.lower()}">
-            <div class="site-url">{url}</div>
+        <div class="site" data-url="{esc(url.lower())}">
+            <div class="site-url">{esc(url)}</div>
             <div class="tech-grid">
         '''
         
@@ -225,10 +234,10 @@ def generate_html_report(data):
             groups = ', '.join(tech_info['groups'])
             
             html_template += f'''
-            <div class="tech-item" data-tech="{tech_name.lower()}">
-                <div class="tech-name">{tech_name}{version}</div>
+            <div class="tech-item" data-tech="{esc(tech_name.lower())}" data-name="{esc(tech_name)}">
+                <div class="tech-name">{esc(tech_name)}{esc(version)}</div>
                 <div class="tech-meta">
-                    {categories} | {groups}
+                    {esc(categories)} | {esc(groups)}
                 </div>
             </div>
             '''
@@ -241,7 +250,8 @@ def generate_html_report(data):
     html_template += '''
     </div>
 
-    <script>
+    <script>'''
+    script = '''
         let activeTags = new Set();
         let allTechnologies = new Set();
         
@@ -249,8 +259,7 @@ def generate_html_report(data):
         function initializeTechnologies() {
             const techItems = document.getElementsByClassName('tech-item');
             Array.from(techItems).forEach(item => {
-                const techName = item.querySelector('.tech-name').textContent.split(' v')[0];
-                allTechnologies.add(techName);
+                allTechnologies.add(item.dataset.name);
             });
         }
         
@@ -300,10 +309,13 @@ def generate_html_report(data):
             
             const tag = document.createElement('div');
             tag.className = 'tag';
-            tag.innerHTML = `
-                ${technology}
-                <span class="tag-remove" onclick="removeTag('${technology}')">&times;</span>
-            `;
+            tag.dataset.name = technology;
+            tag.appendChild(document.createTextNode(technology));
+            const remove = document.createElement('span');
+            remove.className = 'tag-remove';
+            remove.textContent = '\u00d7';
+            remove.addEventListener('click', () => removeTag(technology));
+            tag.appendChild(remove);
             
             tagsContainer.appendChild(tag);
             document.getElementById('searchInput').value = '';
@@ -318,7 +330,7 @@ def generate_html_report(data):
             const tags = tagsContainer.getElementsByClassName('tag');
             
             Array.from(tags).forEach(tag => {
-                if (tag.textContent.trim().includes(technology)) {
+                if (tag.dataset.name === technology) {
                     tag.remove();
                 }
             });
@@ -342,8 +354,7 @@ def generate_html_report(data):
                 for (let tag of activeTags) {
                     let hasTag = false;
                     Array.from(techItems).forEach(item => {
-                        const techName = item.querySelector('.tech-name').textContent.split(' v')[0];
-                        if (techName === tag) {
+                        if (item.dataset.name === tag) {
                             hasTag = true;
                         }
                     });
@@ -388,14 +399,18 @@ def generate_html_report(data):
             a.click();
         }
         
+        document.getElementById('downloadButton').addEventListener('click', downloadUrls);
+
         // Initialize on page load
         initializeSites();
-    </script>
+    '''
+    html_template += script + '''</script>
 </body>
 </html>
     '''
+    script_hash = 'sha256-' + base64.b64encode(hashlib.sha256(script.encode('utf-8')).digest()).decode()
     
-    return html_template
+    return html_template.replace('{script_hash}', script_hash, 1)
 
 def write_to_file(filepath, data, format='json'):
     if format == 'json':
@@ -411,14 +426,14 @@ def write_to_file(filepath, data, format='json'):
             writer = csv.writer(output)
             for url, technologies in data.items():
                 for tech, tech_data in technologies.items():
-                    writer.writerow([
+                    writer.writerow([csv_safe(cell) for cell in (
                         url,
                         tech,
                         tech_data['version'],
                         tech_data['confidence'],
                         ' '.join(tech_data['categories']),
                         ' '.join(tech_data['groups']),
-                    ])
+                    )])
         finally:
             if filepath != '-':
                 output.close()

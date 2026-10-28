@@ -1,3 +1,4 @@
+import hashlib
 import json
 import re
 import shutil
@@ -127,6 +128,8 @@ with tempfile.TemporaryDirectory(prefix="wappalyzer-update-") as tempdir:
     extract_dir = tempdir / "wappalyzer"
 
     urllib.request.urlretrieve(URL, archive_path)
+    # record what was bundled so the update can be checked against AMO
+    print(f"sha256 {hashlib.sha256(archive_path.read_bytes()).hexdigest()}  {URL}")
 
     with zipfile.ZipFile(archive_path) as archive:
         archive.extractall(extract_dir)

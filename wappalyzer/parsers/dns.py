@@ -1,8 +1,10 @@
 import dns.resolver
 import concurrent.futures
 
+# use the system's configured resolver (e.g. the corporate DNS) instead of
+# sending every scanned domain to a hard-coded public resolver
 my_resolver = dns.resolver.Resolver()
-my_resolver.nameservers = ['8.8.8.8', '8.8.4.4']
+my_resolver.lifetime = 10
 
 def query(domain, record_type):
     try:
