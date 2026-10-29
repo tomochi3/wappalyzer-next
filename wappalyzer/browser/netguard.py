@@ -42,6 +42,7 @@ class FilteringProxy:
         self.server = None
         self.port = None
         self.connections = set()
+        self.tasks = set()
 
     async def start(self):
         self.server = await asyncio.start_server(self._handle, '127.0.0.1', 0, limit=MAX_HEADER_BYTES)
@@ -54,6 +55,11 @@ class FilteringProxy:
         for writer in list(self.connections):
             writer.close()
         self.connections.clear()
+        # finish open connections' handlers so none is left pending at exit
+        tasks = list(self.tasks)
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     def _upstream(self, host, tunnel):
         if urllib.request.proxy_bypass(host):
@@ -111,6 +117,8 @@ class FilteringProxy:
 
     async def _handle(self, client_reader, client_writer):
         self.connections.add(client_writer)
+        task = asyncio.current_task()
+        self.tasks.add(task)
         remote_writer = None
         try:
             try:
@@ -155,6 +163,7 @@ class FilteringProxy:
             pass
         finally:
             self.connections.discard(client_writer)
+            self.tasks.discard(task)
             for writer in (remote_writer, client_writer):
                 if writer:
                     writer.close()

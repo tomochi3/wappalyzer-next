@@ -28,8 +28,10 @@
 
   // Page content, scripts, cookies and JavaScript globals: run the regular
   // content script in the tab, or re-run it if this popup was opened before
+  let injected
+
   try {
-    const [{ result: injected } = {}] = await chrome.scripting.executeScript({
+    ;[{ result: injected } = {}] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: () => {
         // eslint-disable-next-line no-undef
@@ -43,20 +45,24 @@
         return true
       },
     })
+  } catch (error) {
+    // e.g. the Chrome Web Store or other pages extensions may not access
+    return
+  }
 
+  // resolves only once the content script has finished (after its 5 s
+  // second pass), so it runs alongside the other checks
+  const analyseContent = async () => {
     if (!injected) {
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         files: ['js/content.js'],
       })
     }
-  } catch (error) {
-    // e.g. the Chrome Web Store or other pages extensions may not access
-    return
   }
 
   // Response headers: one request to the page, made now, without cookies
-  try {
+  const analyseHeaders = async () => {
     let response = await fetch(tab.url, {
       method: 'HEAD',
       credentials: 'omit',
@@ -74,13 +80,84 @@
     await Popup.driver('onWebRequestComplete', [
       { url: tab.url, tabId: tab.id, responseHeaders },
     ])
-  } catch (error) {
-    // headers are optional; the page content is analysed regardless
   }
 
-  // the content script reports in stages (about 1 s, then a 5 s second pass)
-  for (const delay of [1500, 2500, 4000]) {
-    await new Promise((resolve) => setTimeout(resolve, delay))
+  // Script contents and request destinations: the automatic mode reads
+  // these from network events while the page loads. Here the page lists the
+  // resources it has loaded so far, and the same checks run on those.
+  const analyseResources = async () => {
+    const [{ result: resources } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => {
+        const entries = performance.getEntriesByType('resource')
+        const scripts = new Set(
+          [...document.scripts].map((script) => script.src).filter(Boolean)
+        )
+
+        entries
+          .filter(
+            ({ initiatorType, name }) =>
+              initiatorType === 'script' ||
+              (initiatorType === 'link' && /\.m?js(?:[?#]|$)/.test(name))
+          )
+          .forEach(({ name }) => scripts.add(name))
+
+        const requests = entries
+          .filter(({ initiatorType }) =>
+            ['xmlhttprequest', 'fetch', 'beacon'].includes(initiatorType)
+          )
+          .map(({ name }) => name)
+
+        return { scripts: [...scripts], requests: [...new Set(requests)] }
+      },
+    })
+
+    const origin = new URL(tab.url).origin
+    const request = (url) => ({
+      url,
+      tabId: tab.id,
+      frameId: 0,
+      initiator: tab.url,
+    })
+
+    // the page's own bundles first: activeTab lets the extension read those
+    const scripts = (resources?.scripts || [])
+      .filter((url) => /^https?:/i.test(url))
+      .sort(
+        (a, b) =>
+          (b.startsWith(origin) ? 1 : 0) - (a.startsWith(origin) ? 1 : 0)
+      )
+
+    await Promise.all([
+      ...scripts.map((url) =>
+        Popup.driver('onScriptRequestComplete', [request(url)])
+      ),
+      ...(resources?.requests || []).map((url) =>
+        Popup.driver('onXhrRequestComplete', [request(url)])
+      ),
+    ])
+  }
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const started = Date.now()
+  let done = false
+
+  Promise.allSettled([analyseContent(), analyseHeaders(), analyseResources()])
+    .then(() => sleep(1500)) // request destinations are reported after 1 s
+    .then(() => {
+      done = true
+
+      return refresh()
+    })
+
+  // show results as they arrive: the content script reports after about
+  // 1 s and again after 5 s, and large bundles take a few seconds to scan
+  while (Date.now() - started < 30000) {
+    await sleep(1500)
     await refresh()
+
+    if (done && Date.now() - started >= 8000) {
+      break
+    }
   }
 })()

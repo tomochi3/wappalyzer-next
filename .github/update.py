@@ -40,6 +40,10 @@ PROMPT_BLOCK = re.compile(
 
 
 TRACKING_DEFAULT_ON = "getCachedOption('tracking', true)"
+# Upstream reads only the first 100,000 characters of each script. Modern
+# apps ship one large bundle in which a library's code (e.g. Firebase's
+# FirebaseError) usually sits much further in, so read up to 2,000,000.
+SCRIPT_CHARS_LIMIT = "const maxExternalScriptChars = 100000\n"
 
 
 def patch_index_js(content):
@@ -56,6 +60,11 @@ def patch_index_js(content):
         raise RuntimeError("Failed to turn tracking off by default in js/index.js")
 
     content = content.replace(TRACKING_DEFAULT_ON, "getCachedOption('tracking', false)")
+
+    if SCRIPT_CHARS_LIMIT not in content:
+        raise RuntimeError("Failed to raise the script size limit in js/index.js")
+
+    content = content.replace(SCRIPT_CHARS_LIMIT, "const maxExternalScriptChars = 2000000\n")
 
     # the on-demand build has no webRequest permission, where registering
     # these listeners would throw and stop the service worker
