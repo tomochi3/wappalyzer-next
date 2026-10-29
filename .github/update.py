@@ -21,6 +21,9 @@ PROMPT_BLOCK = re.compile(
 )
 
 
+TRACKING_DEFAULT_ON = "getCachedOption('tracking', true)"
+
+
 def patch_index_js(content):
     content = PROMPT_BLOCK.sub("", content, count=1)
 
@@ -30,7 +33,18 @@ def patch_index_js(content):
     if "https://www.wappalyzer.com/upgraded/" in content:
         raise RuntimeError("Failed to remove upgrade prompt from js/index.js")
 
-    return content
+    # don't report visited hostnames to wappalyzer.com unless the user opts in
+    if TRACKING_DEFAULT_ON not in content:
+        raise RuntimeError("Failed to turn tracking off by default in js/index.js")
+
+    return content.replace(TRACKING_DEFAULT_ON, "getCachedOption('tracking', false)")
+
+
+def patch_options_js(content):
+    if "['tracking', true]" not in content:
+        raise RuntimeError("Failed to turn tracking off by default in js/options.js")
+
+    return content.replace("['tracking', true]", "['tracking', false]")
 
 
 def patch_manifest_for_chromium(manifest):
@@ -120,35 +134,42 @@ def write_chromium_extension_archive(extension_dir, archive_path):
                 archive.write(path, path.relative_to(extension_dir))
 
 
-DATA_DIR.mkdir(parents=True, exist_ok=True)
+def patch_extension_tree(extension_dir):
+    for name, patch in (("index.js", patch_index_js), ("options.js", patch_options_js)):
+        path = extension_dir / "js" / name
+        path.write_text(patch(path.read_text(encoding="utf-8")), encoding="utf-8")
 
-with tempfile.TemporaryDirectory(prefix="wappalyzer-update-") as tempdir:
-    tempdir = Path(tempdir)
-    archive_path = tempdir / "wappalyzer.xpi"
-    extract_dir = tempdir / "wappalyzer"
 
-    urllib.request.urlretrieve(URL, archive_path)
-    # record what was bundled so the update can be checked against AMO
-    print(f"sha256 {hashlib.sha256(archive_path.read_bytes()).hexdigest()}  {URL}")
+def main():
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    with zipfile.ZipFile(archive_path) as archive:
-        archive.extractall(extract_dir)
+    with tempfile.TemporaryDirectory(prefix="wappalyzer-update-") as tempdir:
+        tempdir = Path(tempdir)
+        archive_path = tempdir / "wappalyzer.xpi"
+        extract_dir = tempdir / "wappalyzer"
 
-    index_path = extract_dir / "js" / "index.js"
-    index_path.write_text(
-        patch_index_js(index_path.read_text(encoding="utf-8")),
-        encoding="utf-8",
-    )
+        urllib.request.urlretrieve(URL, archive_path)
+        # record what was bundled so the update can be checked against AMO
+        print(f"sha256 {hashlib.sha256(archive_path.read_bytes()).hexdigest()}  {URL}")
 
-    technologies = {}
-    for path in sorted((extract_dir / "technologies").glob("*.json")):
-        technologies.update(json.loads(path.read_text(encoding="utf-8")))
+        with zipfile.ZipFile(archive_path) as archive:
+            archive.extractall(extract_dir)
 
-    (DATA_DIR / "technologies.json").write_text(
-        json.dumps(technologies, indent=4) + "\n",
-        encoding="utf-8",
-    )
-    shutil.copy2(extract_dir / "groups.json", DATA_DIR / "groups.json")
-    shutil.copy2(extract_dir / "categories.json", DATA_DIR / "categories.json")
+        patch_extension_tree(extract_dir)
 
-    write_chromium_extension_archive(extract_dir, EXTENSION_ARCHIVE)
+        technologies = {}
+        for path in sorted((extract_dir / "technologies").glob("*.json")):
+            technologies.update(json.loads(path.read_text(encoding="utf-8")))
+
+        (DATA_DIR / "technologies.json").write_text(
+            json.dumps(technologies, indent=4) + "\n",
+            encoding="utf-8",
+        )
+        shutil.copy2(extract_dir / "groups.json", DATA_DIR / "groups.json")
+        shutil.copy2(extract_dir / "categories.json", DATA_DIR / "categories.json")
+
+        write_chromium_extension_archive(extract_dir, EXTENSION_ARCHIVE)
+
+
+if __name__ == "__main__":
+    main()

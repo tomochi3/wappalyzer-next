@@ -19,7 +19,10 @@
 
 ## Chrome の拡張機能として使う
 
-Chrome 用に調整した Wappalyzer 拡張機能を同梱しています。インストール直後やアップデート時に wappalyzer.com のページが開く処理は取り除いてあります。
+Chrome 用に調整した Wappalyzer 拡張機能を同梱しています。元の拡張機能から次の点を変えています。
+
+- インストール直後やアップデート時に wappalyzer.com のページが開く処理を取り除いています。
+- 閲覧したサイトのホスト名と検出した技術を wappalyzer.com に送る機能を、初期状態でオフにしています。
 
 1. 拡張機能をダウンロードします: **[wappalyzer-extension.zip](https://github.com/tomochi3/wappalyzer-next/raw/main/wappalyzer/data/wappalyzer-extension.zip)**（約35MB）
 2. zip を任意のフォルダに展開します（例: `C:\tools\wappalyzer-ext`）。
@@ -29,7 +32,7 @@ Chrome 用に調整した Wappalyzer 拡張機能を同梱しています。イ�
 6. 調べたいサイトを開き、ツールバーの Wappalyzer アイコンをクリックすると、検出された技術が表示されます。
 
 > [!IMPORTANT]
-> 拡張機能のアイコンを右クリック →「オプション」で、**「特定した技術を匿名でwappalyzer.comに送信する」のチェックを外してください**。オンのままだと、閲覧したサイトのホスト名と検出した技術が wappalyzer.com に送信されます。社内サイトの名前も送られます。
+> 拡張機能の「オプション」にある「特定した技術を匿名でwappalyzer.comに送信する」は、オンにしないでください。オンにすると、閲覧したサイトのホスト名と検出した技術が wappalyzer.com に送信されます。社内サイトの名前も送られます。Chrome ウェブストアの公式版を使う場合は、この設定が初期状態でオンなので、チェックを外してください。
 
 注意:
 
