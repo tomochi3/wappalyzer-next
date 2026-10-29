@@ -14,6 +14,22 @@ DATA_DIR = REPO_ROOT / "wappalyzer" / "data"
 EXTENSION_ARCHIVE = DATA_DIR / "wappalyzer-extension.zip"
 README = REPO_ROOT / "README.md"
 README_CHECKSUM = re.compile(r"(SHA-256: `)[0-9a-f]{64}(`)")
+ONDEMAND_SCRIPT = REPO_ROOT / ".github" / "extension" / "ondemand.js"
+
+# What upstream uses to analyse every page automatically. The Chrome build
+# drops it in favour of activeTab; the CLI (wappalyzer/browser/analyzer.py,
+# AUTOMATIC_MODE) puts the same entries back, so they must stay in sync.
+AUTOMATIC_CONTENT_SCRIPTS = [
+    {"matches": ["http://*/*", "https://*/*"], "js": ["js/content.js"], "run_at": "document_idle"}
+]
+AUTOMATIC_PERMISSIONS = {"tabs", "webRequest"}
+ALL_SITES = ["http://*/*", "https://*/*"]
+ONDEMAND_PERMISSIONS = {"activeTab", "scripting"}
+
+WEBREQUEST_LISTENERS = re.compile(
+    r"^chrome\.webRequest\.onResponseStarted\.addListener\(.*?types: \['xmlhttprequest'\],\n\}\)\n",
+    re.MULTILINE | re.DOTALL,
+)
 
 PROMPT_BLOCK = re.compile(
     r"^[ \t]*const current = await get(?:Cached)?Option\('version'\)\n"
@@ -39,7 +55,27 @@ def patch_index_js(content):
     if TRACKING_DEFAULT_ON not in content:
         raise RuntimeError("Failed to turn tracking off by default in js/index.js")
 
-    return content.replace(TRACKING_DEFAULT_ON, "getCachedOption('tracking', false)")
+    content = content.replace(TRACKING_DEFAULT_ON, "getCachedOption('tracking', false)")
+
+    # the on-demand build has no webRequest permission, where registering
+    # these listeners would throw and stop the service worker
+    content, count = WEBREQUEST_LISTENERS.subn(
+        lambda m: "if (chrome.webRequest) {\n" + m.group(0) + "}\n", content, count=1
+    )
+
+    if count != 1:
+        raise RuntimeError("Failed to guard webRequest listeners in js/index.js")
+
+    return content
+
+
+def patch_popup_html(content):
+    tag = '<script src="../js/popup.js"></script>'
+
+    if tag not in content:
+        raise RuntimeError("Failed to add on-demand script to html/popup.html")
+
+    return content.replace(tag, tag + '\n    <script src="../js/ondemand.js"></script>', 1)
 
 
 def patch_options_js(content):
@@ -58,6 +94,18 @@ def patch_manifest_for_chromium(manifest):
 
     if isinstance(background, dict) and background.get("service_worker"):
         background.pop("scripts", None)
+
+    # on-demand: read a tab only when the user opens the popup on it
+    if manifest.get("content_scripts") != AUTOMATIC_CONTENT_SCRIPTS:
+        raise RuntimeError("Upstream content_scripts changed; update AUTOMATIC_CONTENT_SCRIPTS and the CLI")
+
+    if sorted(manifest.get("host_permissions", [])) != sorted(ALL_SITES):
+        raise RuntimeError("Upstream host_permissions changed; update ALL_SITES and the CLI")
+
+    manifest.pop("content_scripts")
+    manifest.pop("host_permissions")
+    permissions = set(manifest.get("permissions", [])) - AUTOMATIC_PERMISSIONS
+    manifest["permissions"] = sorted(permissions | ONDEMAND_PERMISSIONS)
 
     return manifest
 
@@ -78,15 +126,19 @@ def validate_manifest(manifest):
         errors.append("background.scripts must be removed for Chromium MV3")
 
     permissions = set(manifest.get("permissions", []))
-    host_permissions = set(manifest.get("host_permissions", []))
 
-    for permission in ("cookies", "storage", "tabs", "webRequest"):
+    for permission in ("activeTab", "scripting", "cookies", "storage"):
         if permission not in permissions:
             errors.append(f"missing permission: {permission}")
 
-    for host_permission in ("http://*/*", "https://*/*"):
-        if host_permission not in host_permissions:
-            errors.append(f"missing host permission: {host_permission}")
+    for permission in AUTOMATIC_PERMISSIONS & permissions:
+        errors.append(f"on-demand build must not request: {permission}")
+
+    if manifest.get("host_permissions"):
+        errors.append("on-demand build must not request host_permissions")
+
+    if manifest.get("content_scripts"):
+        errors.append("on-demand build must not have content_scripts")
 
     if "browser_specific_settings" in manifest:
         errors.append("browser_specific_settings must be removed")
@@ -105,6 +157,7 @@ def validate_extension_tree(extension_dir, require_technologies=False):
         "js/background.js",
         "js/index.js",
         "js/content.js",
+        "js/ondemand.js",
     )
 
     for relative_path in required_files:
@@ -137,9 +190,15 @@ def write_chromium_extension_archive(extension_dir, archive_path):
 
 
 def patch_extension_tree(extension_dir):
-    for name, patch in (("index.js", patch_index_js), ("options.js", patch_options_js)):
-        path = extension_dir / "js" / name
+    for name, patch in (
+        ("js/index.js", patch_index_js),
+        ("js/options.js", patch_options_js),
+        ("html/popup.html", patch_popup_html),
+    ):
+        path = extension_dir / name
         path.write_text(patch(path.read_text(encoding="utf-8")), encoding="utf-8")
+
+    shutil.copy2(ONDEMAND_SCRIPT, extension_dir / "js" / "ondemand.js")
 
 
 def update_readme_checksum():

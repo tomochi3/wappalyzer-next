@@ -26,6 +26,17 @@ BLOCKED_RESOURCE_TYPES = {"image", "font", "media"}
 # Chromium ships a release about every 4 weeks; warn when the installed
 # browser is old enough to be missing security fixes
 CHROMIUM_MAX_AGE_DAYS = 45
+# The bundled extension is built to run only when its popup is opened in
+# Chrome. Headless scans need it to analyse every page automatically, so
+# these upstream manifest entries are restored when it is loaded here
+# (kept in sync with AUTOMATIC_CONTENT_SCRIPTS in .github/update.py).
+AUTOMATIC_MODE = {
+    "content_scripts": [
+        {"matches": ["http://*/*", "https://*/*"], "js": ["js/content.js"], "run_at": "document_idle"}
+    ],
+    "host_permissions": ["http://*/*", "https://*/*"],
+    "permissions": ["tabs", "webRequest"],
+}
 # the bundled extension reports scanned hostnames to these by default
 EXTENSION_TELEMETRY_HOSTS = ("ping.wappalyzer.com", "api.wappalyzer.com")
 DISABLE_EXTENSION_TELEMETRY_SCRIPT = """
@@ -331,6 +342,13 @@ def _prepare_extension_dir(extension_archive_path):
 
     with zipfile.ZipFile(extension_archive_path) as archive:
         archive.extractall(extension_dir)
+
+    manifest_path = extension_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["content_scripts"] = AUTOMATIC_MODE["content_scripts"]
+    manifest["host_permissions"] = AUTOMATIC_MODE["host_permissions"]
+    manifest["permissions"] = sorted(set(manifest.get("permissions", [])) | set(AUTOMATIC_MODE["permissions"]))
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
     _validate_extension_dir(extension_dir)
 
