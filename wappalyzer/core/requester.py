@@ -1,9 +1,13 @@
 import sys
 import time
+from http.cookiejar import DefaultCookiePolicy
 from urllib.parse import urljoin, urlparse
 
 import requests
 import urllib3
+from requests.adapters import HTTPAdapter
+from urllib3.connection import HTTPConnection, HTTPSConnection
+from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 
 from wappalyzer.core.security import NetworkPolicy, strip_control_chars
 
@@ -35,6 +39,35 @@ class BlockedRequest(requests.exceptions.RequestException):
     pass
 
 
+def _guarded_pool(pool_cls, conn_cls, policy):
+    class GuardedConnection(conn_cls):
+        def _new_conn(self):
+            sock = super()._new_conn()
+            # check the address actually connected to, so a DNS answer that
+            # changes after the policy check (DNS rebinding) can't slip
+            # through; nothing has been sent yet. Through a proxy the peer is
+            # the proxy itself, which the user configured.
+            if not getattr(self, 'proxy', None) and not policy.allows_peer(sock.getpeername()[0]):
+                sock.close()
+                raise BlockedRequest(f"blocked connection to non-public address: {self.host}")
+            return sock
+
+    return type('GuardedPool', (pool_cls,), {'ConnectionCls': GuardedConnection})
+
+
+class GuardedAdapter(HTTPAdapter):
+    def __init__(self, policy):
+        self.policy = policy
+        super().__init__()
+
+    def init_poolmanager(self, *args, **kwargs):
+        super().init_poolmanager(*args, **kwargs)
+        self.poolmanager.pool_classes_by_scheme = {
+            'http': _guarded_pool(HTTPConnectionPool, HTTPConnection, self.policy),
+            'https': _guarded_pool(HTTPSConnectionPool, HTTPSConnection, self.policy),
+        }
+
+
 class Fetcher:
     """HTTP client for one scan target.
 
@@ -50,6 +83,12 @@ class Fetcher:
         self.cookie = cookie
         self.timeout = timeout
         self.verify = not insecure
+        self.session = requests.Session()
+        # don't carry cookies set by scanned sites over to later requests
+        self.session.cookies.set_policy(DefaultCookiePolicy(allowed_domains=[]))
+        adapter = GuardedAdapter(self.policy)
+        self.session.mount('http://', adapter)
+        self.session.mount('https://', adapter)
 
     def _read_body(self, response, deadline):
         chunks = []
@@ -82,7 +121,7 @@ class Fetcher:
             headers = dict(HEADERS)
             if send_cookie and self.cookie and urlparse(url).hostname == self.target_host:
                 headers['Cookie'] = self.cookie
-            response = requests.get(
+            response = self.session.get(
                 url,
                 headers=headers,
                 verify=self.verify,

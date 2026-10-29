@@ -1,3 +1,4 @@
+import contextvars
 import tldextract
 import concurrent.futures
 from bs4 import BeautifulSoup
@@ -10,6 +11,7 @@ from wappalyzer.parsers.robots import get_robots
 from wappalyzer.parsers.scriptSrc import get_scriptSrc
 from wappalyzer.parsers.certIssuer import get_certIssuer
 
+from wappalyzer.core import safe_regex
 from wappalyzer.core.matcher import match, match_dict
 from wappalyzer.core.config import tech_db
 from wappalyzer.analyzers.dom import match_dom
@@ -29,7 +31,8 @@ def process_scripts(fetcher, base_url, js, scriptSrc):
         return None
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        futures = {executor.submit(fetch_and_process, src): src for src in scriptSrc}
+        # copy the context so worker threads share this scan's regex budget
+        futures = {executor.submit(contextvars.copy_context().run, fetch_and_process, src): src for src in scriptSrc}
         for future in concurrent.futures.as_completed(futures):
             result = future.result()
             if result:
@@ -38,8 +41,14 @@ def process_scripts(fetcher, base_url, js, scriptSrc):
 
 
 def analyze_from_response(response, scan_type, fetcher=None):
-    if fetcher is None:
-        fetcher = Fetcher(response.url)
+    token = safe_regex.start_budget()
+    try:
+        return _analyze_from_response(response, scan_type, fetcher or Fetcher(response.url))
+    finally:
+        safe_regex.end_budget(token)
+
+
+def _analyze_from_response(response, scan_type, fetcher):
     soup = BeautifulSoup(response.text, 'html.parser')
     r = tldextract.extract(response.url)
     domain = r.domain + '.' + r.suffix

@@ -25,18 +25,32 @@ Chrome 用に調整した Wappalyzer 拡張機能を同梱しています。元�
 - 閲覧したサイトのホスト名と検出した技術を wappalyzer.com に送る機能を、初期状態でオフにしています。
 
 1. 拡張機能をダウンロードします: **[wappalyzer-extension.zip](https://github.com/tomochi3/wappalyzer-next/raw/main/wappalyzer/data/wappalyzer-extension.zip)**（約35MB）
-2. zip を任意のフォルダに展開します（例: `C:\tools\wappalyzer-ext`）。
-3. Chrome のアドレスバーに `chrome://extensions` と入力して開きます。
-4. 右上の「デベロッパー モード」をオンにします。
-5. 「パッケージ化されていない拡張機能を読み込む」を押し、展開したフォルダ（`manifest.json` が直下にあるフォルダ）を選びます。
-6. 調べたいサイトを開き、ツールバーの Wappalyzer アイコンをクリックすると、検出された技術が表示されます。
+2. ダウンロードしたファイルが改ざんされていないことを確認します。次のコマンドで表示される値が、下の SHA-256 と一致すれば問題ありません。
+   - Windows（PowerShell）: `Get-FileHash wappalyzer-extension.zip -Algorithm SHA256`
+   - macOS: `shasum -a 256 wappalyzer-extension.zip`
+   - Linux: `sha256sum wappalyzer-extension.zip`
+
+   SHA-256: `0cc46e19d5594f82fae9c9ea82a6810796c1aa5e49f55c22557f702f3ccb0aa2`
+3. zip を任意のフォルダに展開します（例: `C:\tools\wappalyzer-ext`）。
+4. **調査専用の Chrome プロファイルを作ります。** Chrome 右上のプロフィールアイコン →「追加」で新しいプロファイルを作り、以降の手順はそのプロファイルのウィンドウで行います（理由は下の「なぜ専用プロファイルなのか」を参照）。
+5. Chrome のアドレスバーに `chrome://extensions` と入力して開きます。
+6. 右上の「デベロッパー モード」をオンにします。
+7. 「パッケージ化されていない拡張機能を読み込む」を押し、展開したフォルダ（`manifest.json` が直下にあるフォルダ）を選びます。
+8. 調べたいサイトを専用プロファイルで開き、ツールバーの Wappalyzer アイコンをクリックすると、検出された技術が表示されます。
 
 > [!IMPORTANT]
 > 拡張機能の「オプション」にある「特定した技術を匿名でwappalyzer.comに送信する」は、オンにしないでください。オンにすると、閲覧したサイトのホスト名と検出した技術が wappalyzer.com に送信されます。社内サイトの名前も送られます。Chrome ウェブストアの公式版を使う場合は、この設定が初期状態でオンなので、チェックを外してください。
 
-注意:
+#### なぜ専用プロファイルなのか
+拡張機能は、技術を検出するために「すべてのサイトのページ内容・通信・Cookie」を読む権限を持っています。万一、拡張機能に脆弱性が見つかったり、配布物が改ざんされたりすると、その権限でページの中身やログイン中のセッションを盗まれる可能性があります。普段使いのプロファイル（社内システムやメールにログインしているもの）に入れず、調査専用のプロファイルで使えば、被害がそのプロファイルの中だけで止まります。専用プロファイルでは、業務システムにログインしないでください。
 
-- この方法で入れた拡張機能は自動で更新されません。新しい版は、このリポジトリの zip が更新された後に、同じ手順で入れ直してください。
+#### 更新
+この方法で入れた拡張機能は自動で更新されません。このリポジトリでは、毎週新しい版がないか確認し、あれば更新用の pull request が作られます。zip が更新されたら（上の SHA-256 が変わったら）、ダウンロードからやり直し、`chrome://extensions` で古いものを削除してから読み込み直してください。
+
+#### 閲覧履歴の削除
+拡張機能は、検出結果を出したサイトのホスト名をブラウザ内に保存します（外部には送りません）。消したいときは、拡張機能の「オプション」→「キャッシュされた検出値のクリア」を押してください。
+
+#### 注意
 - デベロッパー モードは、会社のポリシーで禁止されていることがあります。社内 PC で使う前に、情報システム部門に確認してください。自動更新される署名付きの公式版が良い場合は、Chrome ウェブストアで「Wappalyzer」を検索して追加してください。
 - 拡張機能で調べられるのは、開いているページ1つずつです。多数の URL をまとめて調べたり、結果をファイルに保存したりするには、次のコマンドラインツールを使ってください。
 - 下の「[セキュリティ](#セキュリティ)」の対策はコマンドラインツールの機能です。拡張機能として使う場合には適用されません。
@@ -46,7 +60,26 @@ Chrome 用に調整した Wappalyzer 拡張機能を同梱しています。元�
 > [!NOTE]
 > PyPI の `wappalyzer` パッケージは元のプロジェクト（[s0md3v/wappalyzer-next](https://github.com/s0md3v/wappalyzer-next)）のもので、このリポジトリのセキュリティ修正は入っていません。このリポジトリからインストールしてください。
 
-#### コマンドラインツールとしてインストール
+#### インストール（おすすめ: 依存パッケージを固定）
+依存パッケージは `requirements.txt` でバージョンとハッシュを固定しています。この方法で入れると、依存パッケージが改ざんされていた場合にインストールが止まります。専用の仮想環境（venv）に入れてください。
+
+macOS / Linux:
+```bash
+python3 -m venv ~/.wappalyzer
+```
+```bash
+~/.wappalyzer/bin/pip install --require-hashes -r https://raw.githubusercontent.com/tomochi3/wappalyzer-next/main/requirements.txt
+```
+```bash
+~/.wappalyzer/bin/pip install --no-deps git+https://github.com/tomochi3/wappalyzer-next.git
+```
+```bash
+~/.wappalyzer/bin/python -m playwright install chromium
+```
+
+Windows（PowerShell）では、`~/.wappalyzer/bin/` を `$HOME\.wappalyzer\Scripts\` に読み替えてください。コマンドは `~/.wappalyzer/bin/wappalyzer`（Windows は `$HOME\.wappalyzer\Scripts\wappalyzer`）で実行できます。
+
+#### 手軽にインストール（依存パッケージは固定されません）
 ```bash
 pipx install git+https://github.com/tomochi3/wappalyzer-next.git
 ```
@@ -54,15 +87,17 @@ pipx install git+https://github.com/tomochi3/wappalyzer-next.git
 pipx run --spec playwright playwright install chromium
 ```
 
-#### ライブラリとしてインストール
-ライブラリとして使う場合は、`venv` や `docker` などの隔離した環境に `pip` でインストールしてください。`--break-system-packages` を付けて通常のインストールもできますが、おすすめしません。
+#### Chromium の更新
+スキャンに使う Chromium は自動では更新されません。信頼できないサイトを開くツールなので、月に1回程度、次の手順で更新してください。インストールから45日以上たつと、実行時に警告が出ます。
 
 ```bash
-pip install git+https://github.com/tomochi3/wappalyzer-next.git
+~/.wappalyzer/bin/pip install --require-hashes -r https://raw.githubusercontent.com/tomochi3/wappalyzer-next/main/requirements.txt
 ```
 ```bash
-python -m playwright install chromium
+~/.wappalyzer/bin/python -m playwright install chromium
 ```
+
+pipx で入れた場合は `pipx upgrade wappalyzer` の後に `pipx run --spec playwright playwright install chromium` を実行します。Docker の場合は `docker compose build --pull` でイメージを作り直してください。
 
 最小構成の Linux コンテナでは、Chromium が必要とするシステムライブラリも入れてください。
 
@@ -147,9 +182,13 @@ Cookie は環境変数 `WAPPALYZER_COOKIE` でも渡せます。`-c "sessionid=a
 コマンドラインツールとライブラリは、スキャンするサイトを信頼できないものとして扱います。
 
 - Chromium はサンドボックスを有効にして動きます。そのため、`--no-sandbox` を付けない限り、root では `full` スキャンを実行しません。一般ユーザーで実行してください。
-- 外部の公開サイトを調べているとき、そのページが社内アドレス・ループバック・リンクローカル（169.254.x.x など）に向けて出すリクエストは遮断します。対象はスクリプト、`fetch()`、WebSocket、HTTP スキャンでのリダイレクト、`robots.txt` です。悪意のあるページがツールを通して社内ネットワークに入り込むことを防ぎます。社内サイトを直接調べることは今までどおりできます。ただし、ブラウザ自身がたどるリダイレクトはチェックしていません。このリスクは、普通のブラウザでそのページを開いた場合と同じです。
+- 外部の公開サイトを調べているとき、そのページが社内アドレス・ループバック・リンクローカル（169.254.x.x など）に向けて出すリクエストは遮断します。対象はスクリプト、`fetch()`、WebSocket、リダイレクト、`robots.txt` など、すべての通信です。悪意のあるページがツールを通して社内ネットワークに入り込むことを防ぎます。社内サイトを直接調べることは今までどおりできます。
+- ブラウザの通信は、ツールが内部で起動するフィルタ用のプロキシを必ず通ります。プロキシ自身が名前解決し、確認した IP アドレスにだけ接続するので、確認の後で DNS の応答を変える攻撃（DNS リバインディング）も防ぎます。HTTP スキャンでも、実際に接続した IP アドレスを確認しています。
+- 社内プロキシを使う環境では、環境変数（`HTTPS_PROXY` など）または OS のプロキシ設定に従って、そのプロキシ経由で通信します。PAC ファイル（自動構成スクリプト）には対応していないので、PAC を使っている場合は `HTTPS_PROXY` にプロキシのアドレスを設定してください。
 - TLS 証明書を検証します。通信を検査する社内プロキシの環境で証明書エラーになる場合は、`--insecure` ではなく、環境変数 `REQUESTS_CA_BUNDLE` に会社の証明書ファイルを指定してください。
 - HTTP レスポンスは 10MB まで、待ち時間は `-t` の秒数までです。
+- ページ内容に正規表現を当てる処理には時間制限があります。細工したページで処理を固まらせる攻撃（ReDoS）を防ぎます。
+- Chromium のインストールから45日以上たっていると、更新を促す警告を出します。
 - URL ごとにブラウザのストレージ・Cookie・キャッシュを消し、ダウンロードは拒否します。
 - 同梱の Wappalyzer 拡張機能が、スキャンしたホスト名を wappalyzer.com に送る機能を止めています。
 - `balanced` スキャンの DNS の問い合わせは、固定の公開 DNS ではなく、PC に設定されている DNS を使います。

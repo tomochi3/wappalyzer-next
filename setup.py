@@ -28,7 +28,8 @@ setup(
         'playwright>=1.48',
         'tldextract',
         'beautifulsoup4',
-        'dnspython'
+        'dnspython',
+        'regex'
     ],
     classifiers=[
         'Development Status :: 5 - Production/Stable',

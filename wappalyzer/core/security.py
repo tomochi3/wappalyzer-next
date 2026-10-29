@@ -97,6 +97,10 @@ class NetworkPolicy:
         # which resolves the name itself; let it through
         return public is not False
 
+    def allows_peer(self, address):
+        """Check the IP address a connection actually reached."""
+        return not self.target_is_public or _is_public_ip(address)
+
     def allows(self, url):
         parsed = urlparse(url)
         if parsed.scheme not in ('http', 'https'):

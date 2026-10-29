@@ -1,11 +1,11 @@
-import re
+from wappalyzer.core import safe_regex
 from urllib.parse import urljoin, urlparse
 
 url_pattern = r'(?:https?:)?//[\w.-]{2,}\.[a-zA-Z]{2,63}(?:[^\'"\s\n]+)?'
 
 def get_urls_from_js(base_url, js):
     scriptSrc = []
-    matches = re.findall(url_pattern, js)
+    matches = safe_regex.findall(url_pattern, js)
     for each in matches:
         if each.startswith('//'):
             scheme = urlparse(base_url).scheme

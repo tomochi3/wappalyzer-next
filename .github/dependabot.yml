@@ -1,0 +1,17 @@
+# Keeps pinned versions current: Python packages (requirements.txt,
+# including Playwright and therefore Chromium), the Docker base image and
+# GitHub Actions. Each update arrives as a pull request.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

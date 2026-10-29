@@ -4,6 +4,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 import zipfile
 from contextlib import asynccontextmanager
 from http.cookies import SimpleCookie
@@ -13,6 +14,7 @@ from urllib.parse import urlparse
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api import async_playwright
 
+from wappalyzer.browser.netguard import FilteringProxy
 from wappalyzer.core.config import extension_path
 from wappalyzer.core.security import NetworkPolicy, strip_control_chars
 from wappalyzer.core.utils import create_result
@@ -21,6 +23,9 @@ from wappalyzer.core.utils import create_result
 WAPPALYZER_POPUP_PATH = "html/popup.html"
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 BLOCKED_RESOURCE_TYPES = {"image", "font", "media"}
+# Chromium ships a release about every 4 weeks; warn when the installed
+# browser is old enough to be missing security fixes
+CHROMIUM_MAX_AGE_DAYS = 45
 # the bundled extension reports scanned hostnames to these by default
 EXTENSION_TELEMETRY_HOSTS = ("ping.wappalyzer.com", "api.wappalyzer.com")
 DISABLE_EXTENSION_TELEMETRY_SCRIPT = """
@@ -375,9 +380,25 @@ def _page_quiet(activity, quiet_ms=1000):
     )
 
 
+def _warn_if_chromium_is_old(executable_path):
+    try:
+        age_days = (time.time() - os.path.getmtime(executable_path)) / 86400
+    except OSError:
+        return
+
+    if age_days > CHROMIUM_MAX_AGE_DAYS:
+        print(
+            f"Warning: Chromium was installed {int(age_days)} days ago and may be missing "
+            "security fixes. Update it with: pip install -U playwright && "
+            "python -m playwright install chromium",
+            file=sys.stderr,
+        )
+
+
 class BrowserDriver:
-    def __init__(self, context, user_data_dir, timeout_ms):
+    def __init__(self, context, user_data_dir, timeout_ms, proxy=None):
         self.context = context
+        self.proxy = proxy
         self.page = None
         self.user_data_dir = Path(user_data_dir)
         self.extension_id = None
@@ -464,6 +485,9 @@ class BrowserDriver:
         except Exception:
             pass
 
+        if self.proxy:
+            await self.proxy.close()
+
         shutil.rmtree(self.user_data_dir, ignore_errors=True)
 
 
@@ -489,6 +513,7 @@ class DriverPool:
             )
 
         self.playwright = await async_playwright().start()
+        _warn_if_chromium_is_old(self.playwright.chromium.executable_path)
         self.extension_dir = _prepare_extension_dir(os.path.abspath(extension_path))
 
         for _ in range(self.size):
@@ -527,8 +552,13 @@ class DriverPool:
         for attempt in range(self.max_retries):
             user_data_dir = tempfile.mkdtemp(prefix="wappalyzer-chromium-")
             context = None
+            driver = BrowserDriver(None, user_data_dir, self.timeout * 1000)
+            # all browser traffic, redirects included, goes through this
+            # proxy so it can be checked against the current scan's policy
+            driver.proxy = FilteringProxy(lambda d=driver: d.policy, EXTENSION_TELEMETRY_HOSTS)
 
             try:
+                proxy_port = await driver.proxy.start()
                 context = await self.playwright.chromium.launch_persistent_context(
                     user_data_dir,
                     channel="chromium",
@@ -540,6 +570,7 @@ class DriverPool:
                     ignore_https_errors=self.insecure,
                     chromium_sandbox=self.sandbox,
                     accept_downloads=False,
+                    proxy={"server": f"http://127.0.0.1:{proxy_port}"},
                     args=[
                         f"--disable-extensions-except={self.extension_dir}",
                         f"--load-extension={self.extension_dir}",
@@ -562,6 +593,8 @@ class DriverPool:
                         "--host-resolver-rules=" + ", ".join(
                             f"MAP {host} ~NOTFOUND" for host in EXTENSION_TELEMETRY_HOSTS
                         ),
+                        # also send loopback traffic through the filtering proxy
+                        "--proxy-bypass-list=<-loopback>",
                     ],
                 )
 
@@ -569,7 +602,7 @@ class DriverPool:
                 context.set_default_timeout(timeout_ms)
                 context.set_default_navigation_timeout(timeout_ms)
 
-                driver = BrowserDriver(context, user_data_dir, timeout_ms)
+                driver.context = context
                 await context.route("**/*", driver.route_handler)
                 await context.route_web_socket("**/*", driver.websocket_handler)
 
@@ -585,6 +618,7 @@ class DriverPool:
                     except Exception:
                         pass
 
+                await driver.proxy.close()
                 shutil.rmtree(user_data_dir, ignore_errors=True)
                 print(f"Attempt {attempt + 1} failed: {str(e)}", file=sys.stderr)
                 await asyncio.sleep(1)

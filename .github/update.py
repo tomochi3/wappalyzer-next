@@ -12,6 +12,8 @@ URL = "https://addons.mozilla.org/firefox/downloads/latest/wappalyzer/platform:2
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = REPO_ROOT / "wappalyzer" / "data"
 EXTENSION_ARCHIVE = DATA_DIR / "wappalyzer-extension.zip"
+README = REPO_ROOT / "README.md"
+README_CHECKSUM = re.compile(r"(SHA-256: `)[0-9a-f]{64}(`)")
 
 PROMPT_BLOCK = re.compile(
     r"^[ \t]*const current = await get(?:Cached)?Option\('version'\)\n"
@@ -140,6 +142,17 @@ def patch_extension_tree(extension_dir):
         path.write_text(patch(path.read_text(encoding="utf-8")), encoding="utf-8")
 
 
+def update_readme_checksum():
+    digest = hashlib.sha256(EXTENSION_ARCHIVE.read_bytes()).hexdigest()
+    content = README.read_text(encoding="utf-8")
+    updated, count = README_CHECKSUM.subn(rf"\g<1>{digest}\g<2>", content)
+
+    if count != 1:
+        raise RuntimeError("README.md must contain exactly one extension SHA-256 line")
+
+    README.write_text(updated, encoding="utf-8")
+
+
 def main():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -169,6 +182,8 @@ def main():
         shutil.copy2(extract_dir / "categories.json", DATA_DIR / "categories.json")
 
         write_chromium_extension_archive(extract_dir, EXTENSION_ARCHIVE)
+
+    update_readme_checksum()
 
 
 if __name__ == "__main__":

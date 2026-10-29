@@ -1,0 +1,11 @@
+# Runtime dependencies, kept in sync with install_requires in setup.py.
+# requirements.txt pins them with hashes: regenerate it with
+#   pip-compile --generate-hashes --strip-extras requirements.in
+requests
+urllib3
+huepy
+playwright>=1.48
+tldextract
+beautifulsoup4
+dnspython
+regex

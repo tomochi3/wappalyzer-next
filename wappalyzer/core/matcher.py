@@ -1,5 +1,7 @@
 import re
 
+from wappalyzer.core import safe_regex
+
 """
 Special strings: version, confidence
 
@@ -66,13 +68,10 @@ def parse_pattern(regex):
 def single_match(regex, string):
     clean_regex, version_type, confidence = parse_pattern(regex)
 
-    this_match = ''
     try:
-        this_match = re.search(clean_regex, string)
-    except Exception as e:
-        if 're.error: bad escape' in str(e):
-            problem = re.search(r'bad escape (.)', str(e)).group(1)
-            this_match = re.search(clean_regex.replace(problem, '\\' + problem), string)
+        this_match = safe_regex.search(clean_regex, string)
+    except safe_regex.error:
+        this_match = None
     if this_match:
         return True, get_version(this_match, version_type), confidence
     return False, '', 0

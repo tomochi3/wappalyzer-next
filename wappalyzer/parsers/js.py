@@ -1,4 +1,4 @@
-import re
+from wappalyzer.core import safe_regex
 from typing import List
 
 def split_into_statements(js_code: str) -> List[str]:
@@ -106,7 +106,7 @@ def get_js(js_code: str) -> dict:
     ]
 
     class_pattern = r'classList.add\([\'"]([^\'"]+)'
-    classes = re.findall(class_pattern, js_code)
+    classes = safe_regex.findall(class_pattern, js_code)
     
     def clean_value(value: str) -> str:
         """Clean and normalize the extracted value."""
@@ -158,7 +158,7 @@ def get_js(js_code: str) -> dict:
             continue
             
         for pattern in patterns:
-            matches = re.finditer(pattern, statement, re.MULTILINE)
+            matches = safe_regex.finditer(pattern, statement, safe_regex.MULTILINE)
             for match in matches:
                 var_name = match.group(1)
                 value = match.group(2)
@@ -170,11 +170,11 @@ def get_js(js_code: str) -> dict:
                 
                 if ('var' or 'let' or 'const') in match.group(0).split(var_name)[0]:
                     # Skip if it's inside a function declaration
-                    if re.search(r'function\s*\(.*\)\s*{', statement):
+                    if safe_regex.search(r'function\s*\(.*\)\s*{', statement):
                         continue
                         
                     # Skip if it's part of a class declaration
-                    if re.search(r'class\s+', statement):
+                    if safe_regex.search(r'class\s+', statement):
                         continue
                 
                 if pattern == patterns[3]:
