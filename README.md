@@ -1,126 +1,164 @@
 # Wappalyzer Next
 
-This project is a command line tool and python library that uses the [Wappalyzer](https://www.wappalyzer.com/) browser extension and its fingerprints to detect technologies. Other projects that emerged after the discontinuation of the official open-source project are using outdated fingerprints and lack accuracy on dynamic web apps. This project bypasses those limitations by running the extension in Chromium through Playwright.
+[Wappalyzer](https://www.wappalyzer.com/) のブラウザ拡張機能とそのフィンガープリントを使って、Web サイトで使われている技術を検出するツールです。次の3通りの使い方ができます。
+
+- **Chrome の拡張機能**として、開いているページを1つずつ調べる
+- **コマンドラインツール**として、多数の URL をまとめて調べ、JSON / CSV / HTML で保存する
+- **Python ライブラリ**として、自分のプログラムから呼び出す
+
+公式のオープンソース版が終了した後に出てきた類似プロジェクトは、フィンガープリントが古く、動的な Web アプリでは精度が出ません。このプロジェクトは Playwright で Chromium を動かし、その中で拡張機能そのものを実行することで、この問題を解決しています。
 
 ![demo](https://github.com/user-attachments/assets/7a51b034-c9a7-44e6-aa80-2f8a23311e72)
 
-- [Installation](https://github.com/s0md3v/wappalyzer-next?tab=readme-ov-file#installation)
-- [For Users](https://github.com/s0md3v/wappalyzer-next?tab=readme-ov-file#for-users)
-- [For Developers](https://github.com/s0md3v/wappalyzer-next?tab=readme-ov-file#for-developers)
-- [FAQ](https://github.com/s0md3v/wappalyzer-next?tab=readme-ov-file#faq)
+- [Chrome の拡張機能として使う](#chrome-の拡張機能として使う)
+- [インストール](#インストール)
+- [コマンドラインでの使い方](#コマンドラインでの使い方)
+- [セキュリティ](#セキュリティ)
+- [開発者向け（Python ライブラリ）](#開発者向けpython-ライブラリ)
+- [FAQ](#faq)
 
-## Installation
+## Chrome の拡張機能として使う
 
-After installing the Python package, install Playwright's Chromium browser:
+Chrome 用に調整した Wappalyzer 拡張機能を同梱しています。インストール直後やアップデート時に wappalyzer.com のページが開く処理は取り除いてあります。
 
+1. 拡張機能をダウンロードします: **[wappalyzer-extension.zip](https://github.com/tomochi3/wappalyzer-next/raw/main/wappalyzer/data/wappalyzer-extension.zip)**（約35MB）
+2. zip を任意のフォルダに展開します（例: `C:\tools\wappalyzer-ext`）。
+3. Chrome のアドレスバーに `chrome://extensions` と入力して開きます。
+4. 右上の「デベロッパー モード」をオンにします。
+5. 「パッケージ化されていない拡張機能を読み込む」を押し、展開したフォルダ（`manifest.json` が直下にあるフォルダ）を選びます。
+6. 調べたいサイトを開き、ツールバーの Wappalyzer アイコンをクリックすると、検出された技術が表示されます。
+
+> [!IMPORTANT]
+> 拡張機能のアイコンを右クリック →「オプション」で、**「特定した技術を匿名でwappalyzer.comに送信する」のチェックを外してください**。オンのままだと、閲覧したサイトのホスト名と検出した技術が wappalyzer.com に送信されます。社内サイトの名前も送られます。
+
+注意:
+
+- この方法で入れた拡張機能は自動で更新されません。新しい版は、このリポジトリの zip が更新された後に、同じ手順で入れ直してください。
+- デベロッパー モードは、会社のポリシーで禁止されていることがあります。社内 PC で使う前に、情報システム部門に確認してください。自動更新される署名付きの公式版が良い場合は、Chrome ウェブストアで「Wappalyzer」を検索して追加してください。
+- 拡張機能で調べられるのは、開いているページ1つずつです。多数の URL をまとめて調べたり、結果をファイルに保存したりするには、次のコマンドラインツールを使ってください。
+- 下の「[セキュリティ](#セキュリティ)」の対策はコマンドラインツールの機能です。拡張機能として使う場合には適用されません。
+
+## インストール
+
+> [!NOTE]
+> PyPI の `wappalyzer` パッケージは元のプロジェクト（[s0md3v/wappalyzer-next](https://github.com/s0md3v/wappalyzer-next)）のもので、このリポジトリのセキュリティ修正は入っていません。このリポジトリからインストールしてください。
+
+#### コマンドラインツールとしてインストール
+```bash
+pipx install git+https://github.com/tomochi3/wappalyzer-next.git
+```
+```bash
+pipx run --spec playwright playwright install chromium
+```
+
+#### ライブラリとしてインストール
+ライブラリとして使う場合は、`venv` や `docker` などの隔離した環境に `pip` でインストールしてください。`--break-system-packages` を付けて通常のインストールもできますが、おすすめしません。
+
+```bash
+pip install git+https://github.com/tomochi3/wappalyzer-next.git
+```
 ```bash
 python -m playwright install chromium
 ```
 
-In minimal Linux containers, install Chromium's system dependencies as well:
+最小構成の Linux コンテナでは、Chromium が必要とするシステムライブラリも入れてください。
 
 ```bash
 python -m playwright install-deps chromium
 ```
 
+#### Docker でインストール
+<details><summary>手順</summary>
 
-#### Install as a command-line tool
+1. リポジトリをクローンします。
 ```bash
-pipx install wappalyzer
-pipx run --spec playwright playwright install chromium
+git clone https://github.com/tomochi3/wappalyzer-next.git
 ```
-
-#### Install as a library
-To use it as a library, install it with `pip` inside an isolated container e.g. `venv` or `docker`. You may also `--break-system-packages` to do a 'regular' install but it is not recommended.
-
 ```bash
-pip install wappalyzer
-python -m playwright install chromium
-```
-
-#### Install with docker
-<details><summary>Steps</summary>
-
-1. Clone the repository:
-```bash
-git clone https://github.com/s0md3v/wappalyzer-next.git
 cd wappalyzer-next
 ```
 
-2. Build and run with Docker Compose:
+2. Docker Compose でビルドします。
 ```bash
 docker compose build
 ```
 
-3. To scan URLs using the Docker container:
+3. コンテナで URL を調べます。
 
-- Scan a single URL:
+- 1つの URL を調べる:
 ```bash
 docker compose run --rm wappalyzer -i https://example.com
 ```
-- Scan multiple URLs from a file:
+- ファイルに書いた複数の URL を調べる:
 ```bash
 docker compose run --rm wappalyzer -i urls.txt -w 3 -oJ output.json
 ```
 
-The container runs as a non-root user (uid 1000) with Chromium's sandbox enabled. `docker-compose.yml` sets the options the sandbox needs; with plain `docker run`, pass them yourself:
+コンテナは一般ユーザー（uid 1000）で動き、Chromium のサンドボックスも有効です。サンドボックスに必要な設定は `docker-compose.yml` に入っています。`docker run` で直接動かす場合は、次のように自分で指定してください。
 ```bash
 docker run --rm --shm-size 2g --security-opt seccomp=docker/seccomp_profile.json --security-opt no-new-privileges:true --cap-drop ALL --cap-add SYS_CHROOT -v "$PWD:/app" wappalyzer -i https://example.com
 ```
-Output files are written to the mounted directory as uid 1000, so that directory must be writable by it.
+出力ファイルはマウントしたディレクトリに uid 1000 として書き込まれるので、そのディレクトリは uid 1000 から書き込める必要があります。
 </details>
 
-## For Users
-Some common usage examples are given below, refer to list of all options for more information.
+## コマンドラインでの使い方
+よく使う例です。すべてのオプションは下の一覧を参照してください。
 
-- Scan a single URL: `wappalyzer -i https://example.com`
-- Scan multiple URLs from a file: `wappalyzer -i urls.txt -w 3`
-- Set page-load timeout for full scans: `wappalyzer -i urls.txt -t 15`
-- Scan with authentication: `wappalyzer -i https://example.com --cookie-file cookie.txt` (or set `WAPPALYZER_COOKIE`; `-c "sessionid=abc123"` also works but is visible in the process list and shell history)
-- Export results to JSON: `wappalyzer -i https://example.com -oJ results.json`
-- Export JSON to stdout: `wappalyzer -i https://example.com -oJ`
+| やりたいこと | コマンド |
+|---|---|
+| 1つの URL を調べる | `wappalyzer -i https://example.com` |
+| ファイルに書いた複数の URL を調べる（1行に1つ） | `wappalyzer -i urls.txt -w 3` |
+| タイムアウトを変える（秒） | `wappalyzer -i urls.txt -t 15` |
+| ログインが必要なページを調べる | `wappalyzer -i https://example.com --cookie-file cookie.txt` |
+| JSON で保存する | `wappalyzer -i https://example.com -oJ results.json` |
+| JSON を標準出力に出す | `wappalyzer -i https://example.com -oJ` |
+| CSV で保存する | `wappalyzer -i urls.txt -oC results.csv` |
+| HTML レポートを作る（検索・絞り込みができる） | `wappalyzer -i urls.txt -oH report.html` |
+| ブラウザを使わずに速く調べる（精度は下がる） | `wappalyzer -i urls.txt --scan-type fast` |
 
-When an output flag is used without a file, the report is written to stdout. Status lines, banner text, and errors are written to stderr.
+Cookie は環境変数 `WAPPALYZER_COOKIE` でも渡せます。`-c "sessionid=abc123"` と直接書くこともできますが、プロセス一覧やシェルの履歴に残ります。
 
-#### Options
+出力オプションでファイル名を省略すると、結果は標準出力に書き出されます。進捗、バナー、エラーは標準エラーに出ます。
 
-> Note: For accuracy use 'full' scan type (default). 'fast' and 'balanced' do not use browser emulation.
+#### オプション一覧
 
-- `-i`: Input URL or file containing URLs (one per line)
-- `--scan-type`: Scan type (default: 'full')
-  - `fast`: Quick HTTP-based scan (sends 1 request)
-  - `balanced`: HTTP-based scan with more requests
-  - `full`: Complete scan using wappalyzer extension
-- `-w, --workers`: Number of concurrent workers (default: 5; full scans are capped at 3)
-- `-t, --timeout`: Maximum seconds to wait for a page load or HTTP response (default: 30)
-- `-oJ [file]`: JSON output file path, or stdout when the file is omitted or set to `-`
-- `-oC [file]`: CSV output file path, or stdout when the file is omitted or set to `-`
-- `-oH [file]`: HTML output file path, or stdout when the file is omitted or set to `-`
-- `-c, --cookie`: Cookie header string for authenticated scans
-- `--cookie-file`: Read the cookie header string from a file (the `WAPPALYZER_COOKIE` environment variable is used when neither is given)
-- `--insecure`: Do not verify TLS certificates
-- `--no-sandbox`: Disable the Chromium sandbox. Only use this inside an isolated container; `WAPPALYZER_NO_SANDBOX=1` does the same
+> 精度を重視する場合は `full`（既定）を使ってください。`fast` と `balanced` はブラウザを使いません。
 
-#### Security
+- `-i`: 調べる URL、または URL を1行に1つずつ書いたファイル
+- `--scan-type`: スキャンの種類（既定: `full`）
+  - `fast`: HTTP リクエストを1回だけ送る簡易スキャン
+  - `balanced`: HTTP でさらにリクエストを送るスキャン
+  - `full`: Wappalyzer 拡張機能を使う完全なスキャン
+- `-w, --workers`: 同時に処理する数（既定: 5。`full` は最大3）
+- `-t, --timeout`: ページの読み込みや HTTP レスポンスを待つ最大秒数（既定: 30）
+- `-oJ [file]`: JSON の出力先。省略するか `-` にすると標準出力
+- `-oC [file]`: CSV の出力先。省略するか `-` にすると標準出力
+- `-oH [file]`: HTML レポートの出力先。省略するか `-` にすると標準出力
+- `-c, --cookie`: ログインが必要なページ用の Cookie ヘッダー文字列
+- `--cookie-file`: Cookie ヘッダー文字列をファイルから読む（どちらも指定しない場合は環境変数 `WAPPALYZER_COOKIE` を使う）
+- `--insecure`: TLS 証明書を検証しない
+- `--no-sandbox`: Chromium のサンドボックスを無効にする。隔離したコンテナの中でだけ使ってください。環境変数 `WAPPALYZER_NO_SANDBOX=1` でも同じです
 
-Scanned sites are treated as untrusted:
+## セキュリティ
 
-- Chromium runs with its sandbox enabled, so wappalyzer refuses to run full scans as root unless `--no-sandbox` is given.
-- When the target is a public site, requests it triggers to private, loopback or link-local addresses (scripts, `fetch()`, WebSockets, redirects in HTTP scans, `robots.txt`) are blocked, so a hostile page cannot reach your internal network through the scanner. Scanning an internal target directly is still allowed. Redirects followed by the browser itself are not checked, which is the same exposure as opening the page in a normal browser.
-- TLS certificates are verified. Behind a TLS-inspecting corporate proxy, point `REQUESTS_CA_BUNDLE` at your company's CA bundle instead of using `--insecure`.
-- HTTP responses are limited to 10 MB and to the `-t` timeout.
-- Browser storage, cookies and cache are wiped between URLs, and downloads are refused.
-- The bundled Wappalyzer extension's usage reporting to wappalyzer.com, which includes scanned hostnames, is turned off.
-- DNS lookups for balanced scans use the system resolver instead of a hard-coded public one.
-- Values taken from scanned pages are escaped in HTML reports, which also carry a Content-Security-Policy. They are neutralised against formula injection in CSV, and stripped of control characters on the terminal.
+コマンドラインツールとライブラリは、スキャンするサイトを信頼できないものとして扱います。
 
-## For Developers
+- Chromium はサンドボックスを有効にして動きます。そのため、`--no-sandbox` を付けない限り、root では `full` スキャンを実行しません。一般ユーザーで実行してください。
+- 外部の公開サイトを調べているとき、そのページが社内アドレス・ループバック・リンクローカル（169.254.x.x など）に向けて出すリクエストは遮断します。対象はスクリプト、`fetch()`、WebSocket、HTTP スキャンでのリダイレクト、`robots.txt` です。悪意のあるページがツールを通して社内ネットワークに入り込むことを防ぎます。社内サイトを直接調べることは今までどおりできます。ただし、ブラウザ自身がたどるリダイレクトはチェックしていません。このリスクは、普通のブラウザでそのページを開いた場合と同じです。
+- TLS 証明書を検証します。通信を検査する社内プロキシの環境で証明書エラーになる場合は、`--insecure` ではなく、環境変数 `REQUESTS_CA_BUNDLE` に会社の証明書ファイルを指定してください。
+- HTTP レスポンスは 10MB まで、待ち時間は `-t` の秒数までです。
+- URL ごとにブラウザのストレージ・Cookie・キャッシュを消し、ダウンロードは拒否します。
+- 同梱の Wappalyzer 拡張機能が、スキャンしたホスト名を wappalyzer.com に送る機能を止めています。
+- `balanced` スキャンの DNS の問い合わせは、固定の公開 DNS ではなく、PC に設定されている DNS を使います。
+- スキャンしたページから取り出した値は、HTML レポートではエスケープします（Content-Security-Policy も付けています）。CSV では数式として実行されないようにし、ターミナルでは制御文字を取り除きます。
 
-The python library is available on pypi as `wappalyzer` and can be imported with the same name.
+## 開発者向け（Python ライブラリ）
 
-#### Using the Library
+ライブラリは `wappalyzer` という名前で import できます。
 
-Use `Wappalyzer` when scanning more than one URL. The browser is started once, reused, and closed when the `with` block exits.
+#### ライブラリの使い方
+
+複数の URL を調べるときは `Wappalyzer` を使います。ブラウザは1回だけ起動されて使い回され、`with` ブロックを抜けると閉じます。
 
 ```python
 from wappalyzer import Wappalyzer
@@ -139,7 +177,7 @@ for url, technologies in results.items():
         print(f"  {name}{version}")
 ```
 
-The same scanner can also scan one URL at a time without reopening Chromium:
+同じスキャナーで、Chromium を開き直さずに1つずつ調べることもできます。
 
 ```python
 from wappalyzer import Wappalyzer
@@ -149,37 +187,37 @@ with Wappalyzer(workers=3, timeout=30) as scanner:
     python = scanner.analyze('https://python.org')
 ```
 
-For a single URL, `analyze()` is shorter. It creates its own scanner, runs one scan, and closes it.
+URL が1つだけなら `analyze()` が手軽です。スキャナーを作り、1回スキャンして閉じます。
 
 ```python
 from wappalyzer import analyze
 
 results = analyze(
     url='https://example.com',
-    scan_type='full',  # 'fast', 'balanced', or 'full'
+    scan_type='full',  # 'fast'、'balanced'、'full' のいずれか
     cookie='sessionid=abc123',
     timeout=30
 )
 ```
 
-Do not call the top-level `analyze()` function in a loop for large jobs. Use `Wappalyzer.analyze_many()` or `Wappalyzer.analyze()` on a reused scanner so Chromium and the Wappalyzer extension are not reloaded for every URL.
+大量の URL を調べるときに、トップレベルの `analyze()` をループで呼ばないでください。URL ごとに Chromium と拡張機能が読み込み直されます。`Wappalyzer.analyze_many()` を使うか、使い回すスキャナーで `Wappalyzer.analyze()` を呼んでください。
 
-#### analyze() Function Parameters
+#### analyze() の引数
 
-- `url` (str): The URL to analyze
-- `scan_type` (str, optional): Type of scan to perform
-  - `'fast'`: Quick HTTP-based scan
-  - `'balanced'`: HTTP-based scan with more requests
-  - `'full'`: Complete scan including JavaScript execution (default)
-- `workers` (int, optional): Number of browser workers to create for full scans (default: 1)
-- `cookie` (str, optional): Cookie header string for authenticated scans
-- `timeout` (int, optional): Maximum seconds to wait for a page load or HTTP response (default: 30)
-- `sandbox` (bool, optional): Run Chromium with its sandbox (default: True). Must run as a non-root user
-- `insecure` (bool, optional): Skip TLS certificate verification (default: False)
+- `url` (str): 調べる URL
+- `scan_type` (str, 省略可): スキャンの種類
+  - `'fast'`: HTTP の簡易スキャン
+  - `'balanced'`: HTTP でさらにリクエストを送るスキャン
+  - `'full'`: JavaScript の実行も含む完全なスキャン（既定）
+- `workers` (int, 省略可): `full` スキャンで作るブラウザの数（既定: 1）
+- `cookie` (str, 省略可): ログインが必要なページ用の Cookie ヘッダー文字列
+- `timeout` (int, 省略可): ページの読み込みや HTTP レスポンスを待つ最大秒数（既定: 30）
+- `sandbox` (bool, 省略可): Chromium をサンドボックス付きで動かす（既定: True）。root 以外のユーザーで実行する必要があります
+- `insecure` (bool, 省略可): TLS 証明書を検証しない（既定: False）
 
-#### Return Value
+#### 戻り値
 
-Returns a dictionary with the URL as key and detected technologies as value:
+URL をキー、検出した技術を値とする辞書を返します。
 
 ```json
 {
@@ -201,12 +239,12 @@ Returns a dictionary with the URL as key and detected technologies as value:
 }
 ```
 
-### FAQ
+## FAQ
 
-#### Why Chromium and Playwright?
-The full scanner runs the Wappalyzer extension in Chromium through Playwright. Chromium extension support in Playwright is direct and does not require geckodriver or Selenium.
+#### なぜ Chromium と Playwright を使うのですか？
+`full` スキャンは、Playwright で動かす Chromium の中で Wappalyzer 拡張機能を実行します。Playwright は Chromium の拡張機能を直接扱えるので、geckodriver や Selenium が要りません。
 
-#### What is the difference between 'fast', 'balanced', and 'full' scan types?
-- **fast**: Sends a single HTTP request to the URL. Doesn't use the extension.
-- **balanced**: Sends additional HTTP requests to .js files, /robots.txt and does DNS queries. Doesn't use the extension.
-- **full**: Uses the official Wappalyzer extension to scan the URL in a headless browser.
+#### `fast`、`balanced`、`full` の違いは？
+- **fast**: URL に HTTP リクエストを1回だけ送ります。拡張機能は使いません。
+- **balanced**: さらに .js ファイルや /robots.txt にリクエストを送り、DNS も問い合わせます。拡張機能は使いません。
+- **full**: 公式の Wappalyzer 拡張機能を使い、ヘッドレスブラウザで URL を調べます。
