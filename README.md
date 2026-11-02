@@ -32,7 +32,7 @@ Chrome 用に調整した Wappalyzer 拡張機能を同梱しています。元�
    - macOS: `shasum -a 256 wappalyzer-extension.zip`
    - Linux: `sha256sum wappalyzer-extension.zip`
 
-   SHA-256: `cfa1cb33d96e6fad1629d5679adb48e176391df1a6e97af77571425974027335`
+   SHA-256: `d4f1d2e12888bd2646f052a93235560fa355509b32b898279a6015ce51ee6b2a`
 3. zip を任意のフォルダに展開します（例: `C:\tools\wappalyzer-ext`）。
 4. **調査専用の Chrome プロファイルを作ります。** Chrome 右上のプロフィールアイコン →「追加」で新しいプロファイルを作り、以降の手順はそのプロファイルのウィンドウで行います（理由は下の「なぜ専用プロファイルなのか」を参照）。
 5. Chrome のアドレスバーに `chrome://extensions` と入力して開きます。
